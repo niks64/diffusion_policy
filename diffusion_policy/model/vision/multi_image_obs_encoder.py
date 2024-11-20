@@ -1,11 +1,12 @@
-from typing import Dict, Tuple, Union
 import copy
+from typing import Dict, Tuple, Union
+
 import torch
 import torch.nn as nn
 import torchvision
-from diffusion_policy.model.vision.crop_randomizer import CropRandomizer
-from diffusion_policy.model.common.module_attr_mixin import ModuleAttrMixin
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
+from diffusion_policy.model.common.module_attr_mixin import ModuleAttrMixin
+from diffusion_policy.model.vision.crop_randomizer import CropRandomizer
 
 
 class MultiImageObsEncoder(ModuleAttrMixin):
@@ -140,16 +141,21 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                 assert img.shape[1:] == self.key_shape_map[key]
                 img = self.key_transform_map[key](img)
                 imgs.append(img)
-            # (N*B,C,H,W)
-            imgs = torch.cat(imgs, dim=0)
-            # (N*B,D)
-            feature = self.key_model_map['rgb'](imgs)
-            # (N,B,D)
-            feature = feature.reshape(-1,batch_size,*feature.shape[1:])
-            # (B,N,D)
-            feature = torch.moveaxis(feature,0,1)
-            # (B,N*D)
-            feature = feature.reshape(batch_size,-1)
+            # # (N*B,C,H,W)
+            # imgs = torch.cat(imgs, dim=0)
+            # # (N*B,D)
+            # feature = self.key_model_map['rgb'](imgs)
+            # # (N,B,D)
+            # feature = feature.reshape(-1,batch_size,*feature.shape[1:])
+            # # (B,N,D)
+            # feature = torch.moveaxis(feature,0,1)
+            # # (B,N*D)
+            # feature = feature.reshape(batch_size,-1)
+            # features.append(feature)
+
+            import random
+            random_img = random.choice(imgs)
+            feature = self.key_model_map['rgb'](random_img)
             features.append(feature)
         else:
             # run each rgb obs to independent models
