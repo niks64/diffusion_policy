@@ -26,6 +26,7 @@ from diffusion_policy.gym_util.video_recording_wrapper import (
 from diffusion_policy.model.common.rotation_transformer import RotationTransformer
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 
+# local_rng = np.random.RandomState(int.from_bytes(os.urandom(4), byteorder='big'))
 
 def create_env(env_meta, shape_meta, enable_render=True):
     modality_mapping = collections.defaultdict(list)
@@ -63,13 +64,14 @@ class RobomimicMultiviewRunner(BaseImageRunner):
             n_obs_steps=2,
             n_action_steps=8,
             render_obs_key='agentview_image',  # expected key for policy input
-            alt_render_obs_key='sideview_image',  # new argument: alternate view key
+            alt_obs_key='sideview_image',  # new argument: alternate view key
             fps=10,
             crf=22,
             past_action=False,
             abs_action=False,
             tqdm_interval_sec=5.0,
-            n_envs=None
+            n_envs=None,
+            reward_shaping=True
         ):
         super().__init__(output_dir)
         
@@ -84,6 +86,28 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
         # disable object state observation
         env_meta['env_kwargs']['use_object_obs'] = False
+        env_meta['env_kwargs']['reward_shaping'] = reward_shaping
+        
+        camera_shape = [3, 128, 128]
+
+        new_obs = {}
+        for key, value in shape_meta["obs"].items():
+            if "image" in key:
+                camera_shape = value["shape"]
+                break
+
+        new_obs[alt_obs_key] = {
+            "shape": camera_shape,
+            "type": "rgb"
+        }
+
+        for key, value in shape_meta["obs"].items():
+            if "image" not in key:
+                new_obs[key] = value
+
+        shape_meta["obs"] = new_obs
+
+        print("\nShape Meta:\n", shape_meta, "\n")
 
         rotation_transformer = None
         if abs_action:
@@ -104,7 +128,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
-                        render_obs_key=alt_render_obs_key  # <--- use alternate view
+                        render_obs_key=alt_obs_key  # <--- use alternate view
                     ),
                     video_recoder=VideoRecorder.create_h264(
                         fps=fps,
@@ -134,7 +158,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
-                        render_obs_key=alt_render_obs_key  # <--- use alternate view here as well
+                        render_obs_key=alt_obs_key  # <--- use alternate view here as well
                     ),
                     video_recoder=VideoRecorder.create_h264(
                         fps=fps,
@@ -188,6 +212,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         # test
         for i in range(n_test):
             seed = test_start_seed + i
+            # seed = local_rng.randint(0, 1000000)
             enable_render = i < n_test_vis
 
             def init_fn(env, seed=seed, 
@@ -232,7 +257,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         self.tqdm_interval_sec = tqdm_interval_sec
         # Save the expected view key (for the policy) and the alternate view key (used in the env)
         self.default_view_key = render_obs_key
-        self.alt_render_obs_key = alt_render_obs_key
+        self.alt_render_obs_key = alt_obs_key
 
     def run(self, policy: BaseImagePolicy):
         device = policy.device
@@ -282,6 +307,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                 # (i.e. copy the image from alt_render_obs_key to default_view_key)
                 if self.alt_render_obs_key != self.default_view_key:
                     np_obs_dict[self.default_view_key] = np_obs_dict[self.alt_render_obs_key]
+                    del np_obs_dict[self.alt_render_obs_key]
                 
                 if self.past_action and (past_action is not None):
                     np_obs_dict['past_action'] = past_action[
