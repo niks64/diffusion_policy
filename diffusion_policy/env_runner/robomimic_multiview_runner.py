@@ -87,6 +87,8 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         # disable object state observation
         env_meta['env_kwargs']['use_object_obs'] = False
         env_meta['env_kwargs']['reward_shaping'] = reward_shaping
+        if alt_obs_key.split("_")[0] not in env_meta['env_kwargs']['camera_names']:
+            env_meta['env_kwargs']['camera_names'].append(alt_obs_key.split("_")[0])
         
         camera_shape = [3, 128, 128]
 
@@ -97,6 +99,11 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                 break
 
         new_obs[alt_obs_key] = {
+            "shape": camera_shape,
+            "type": "rgb"
+        }
+
+        new_obs["robot0_eye_in_hand_image"] = {
             "shape": camera_shape,
             "type": "rgb"
         }
