@@ -64,7 +64,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
             n_obs_steps=2,
             n_action_steps=8,
             render_obs_key='agentview_image',  # expected key for policy input
-            alt_obs_key='sideview_image',  # new argument: alternate view key
+            alt_obs_key='agentview_image',  # new argument: alternate view key
             fps=10,
             crf=22,
             past_action=False,
@@ -114,7 +114,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
 
         shape_meta["obs"] = new_obs
 
-        print("\nShape Meta:\n", shape_meta, "\n")
+        # print("\nShape Meta:\n", shape_meta, "\n")
 
         rotation_transformer = None
         if abs_action:
@@ -372,9 +372,13 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                 log_data[prefix+f'sim_video_{seed}'] = sim_video
         
         for prefix, value in max_rewards.items():
-            name = prefix+'mean_score'
-            value = np.mean(value)
-            log_data[name] = value
+            ms_name = prefix+'mean_score'
+            ms_value = np.mean(value)
+            log_data[ms_name] = ms_value
+
+            sr_name = prefix+'success_rate'
+            sr_value = sum(x == 1.0 for x in value) / len(value) * 100
+            log_data[sr_name] = sr_value
 
         return log_data
 
