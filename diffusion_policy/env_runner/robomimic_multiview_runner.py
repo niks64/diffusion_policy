@@ -2,7 +2,7 @@ import collections
 import math
 import os
 import pathlib
-
+import copy
 import dill
 import h5py
 import numpy as np
@@ -75,8 +75,14 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         ):
         super().__init__(output_dir)
         
+        shape_meta = copy.deepcopy(shape_meta)
+
         if n_envs is None:
             n_envs = n_train + n_test
+
+        record_video = (n_train_vis + n_test_vis) > 0
+        if not record_video:
+            crf = None
 
         dataset_path = os.path.expanduser(dataset_path)
         robosuite_fps = 20
@@ -89,6 +95,16 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         env_meta['env_kwargs']['reward_shaping'] = reward_shaping
         if alt_obs_key.split("_")[0] not in env_meta['env_kwargs']['camera_names']:
             env_meta['env_kwargs']['camera_names'].append(alt_obs_key.split("_")[0])
+
+        # fast path when videos off
+        if crf is None:
+            def build_recorder():
+                return None  # VideoRecordingWrapper will skip encode
+        else:
+            def build_recorder():
+                return VideoRecorder.create_h264(
+                    fps=fps, codec='h264', input_pix_fmt='rgb24', crf=crf,
+                    thread_type='FRAME', thread_count=1)
         
         camera_shape = [3, 128, 128]
 
@@ -137,14 +153,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                         init_state=None,
                         render_obs_key=alt_obs_key  # <--- use alternate view
                     ),
-                    video_recoder=VideoRecorder.create_h264(
-                        fps=fps,
-                        codec='h264',
-                        input_pix_fmt='rgb24',
-                        crf=crf,
-                        thread_type='FRAME',
-                        thread_count=1
-                    ),
+                    video_recoder=build_recorder(),
                     file_path=None,
                     steps_per_render=steps_per_render
                 ),
@@ -167,14 +176,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                         init_state=None,
                         render_obs_key=alt_obs_key  # <--- use alternate view here as well
                     ),
-                    video_recoder=VideoRecorder.create_h264(
-                        fps=fps,
-                        codec='h264',
-                        input_pix_fmt='rgb24',
-                        crf=crf,
-                        thread_type='FRAME',
-                        thread_count=1
-                    ),
+                    video_recoder=build_recorder(),
                     file_path=None,
                     steps_per_render=steps_per_render
                 ),
