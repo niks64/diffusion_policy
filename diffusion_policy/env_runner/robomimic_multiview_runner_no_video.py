@@ -12,21 +12,15 @@ import robomimic.utils.obs_utils as ObsUtils
 import torch
 import tqdm
 import wandb
-import wandb.sdk.data_types.video as wv
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.env.robomimic.robomimic_image_wrapper import RobomimicImageWrapper
 from diffusion_policy.env_runner.base_image_runner import BaseImageRunner
 from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
 from diffusion_policy.gym_util.multistep_wrapper import MultiStepWrapper
 from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
-from diffusion_policy.gym_util.video_recording_wrapper import (
-    VideoRecorder,
-    VideoRecordingWrapper,
-)
 from diffusion_policy.model.common.rotation_transformer import RotationTransformer
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 
-# local_rng = np.random.RandomState(int.from_bytes(os.urandom(4), byteorder='big'))
 
 def create_env(env_meta, shape_meta, enable_render=True):
     modality_mapping = collections.defaultdict(list)
@@ -36,35 +30,33 @@ def create_env(env_meta, shape_meta, enable_render=True):
 
     env = EnvUtils.create_env_from_metadata(
         env_meta=env_meta,
-        render=False, 
+        render=False,
         render_offscreen=enable_render,
-        use_image_obs=enable_render, 
+        use_image_obs=enable_render,
     )
     return env
 
-class RobomimicMultiviewRunner(BaseImageRunner):
+class RobomimicMultiviewRunnerNoVideo(BaseImageRunner):
     """
-    A custom env runner to evaluate a policy on an alternate camera view.
-    In this class, the additional argument `alt_render_obs_key` determines
-    which camera view to use (e.g. 'sideview_image'). At runtime, the image
-    from that alternate view is remapped into the observation key expected by
-    the policy (e.g. 'agentview_image').
+    Runner without video recording. Evaluates a policy on an alternate camera view.
+    The `alt_render_obs_key` determines the camera view used (e.g. 'sideview_image').
+    This image is remapped to the key expected by the policy (e.g. 'agentview_image').
     """
-    def __init__(self, 
+    def __init__(self,
             output_dir,
             dataset_path,
             shape_meta: dict,
             n_train=10,
-            n_train_vis=3,
+            n_train_vis=0, # Set to 0 as no visualization/video is recorded
             train_start_idx=0,
             n_test=22,
-            n_test_vis=6,
+            n_test_vis=0, # Set to 0 as no visualization/video is recorded
             test_start_seed=10000,
             max_steps=400,
             n_obs_steps=2,
             n_action_steps=8,
             render_obs_key='agentview_image',  # expected key for policy input
-            alt_obs_key='agentview_image',  # new argument: alternate view key
+            alt_obs_key='agentview_image',  # alternate view key
             fps=10,
             crf=22,
             past_action=False,
@@ -74,14 +66,15 @@ class RobomimicMultiviewRunner(BaseImageRunner):
             reward_shaping=True
         ):
         super().__init__(output_dir)
-        
+
+        # We still need the output_dir for logging, but create it if it doesn't exist
+        pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+
         shape_meta = copy.deepcopy(shape_meta)
 
         if n_envs is None:
             n_envs = n_train + n_test
         dataset_path = os.path.expanduser(dataset_path)
-        robosuite_fps = 20
-        steps_per_render = max(robosuite_fps // fps, 1)
 
         # read from dataset
         env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
@@ -90,7 +83,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         env_meta['env_kwargs']['reward_shaping'] = reward_shaping
         if alt_obs_key.split("_")[0] not in env_meta['env_kwargs']['camera_names']:
             env_meta['env_kwargs']['camera_names'].append(alt_obs_key.split("_")[0])
-        
+
         camera_shape = [3, 128, 128]
 
         new_obs = {}
@@ -115,61 +108,47 @@ class RobomimicMultiviewRunner(BaseImageRunner):
 
         shape_meta["obs"] = new_obs
 
-        # print("\nShape Meta:\n", shape_meta, "\n")
-
         rotation_transformer = None
         if abs_action:
             env_meta['env_kwargs']['controller_configs']['control_delta'] = False
             rotation_transformer = RotationTransformer('axis_angle', 'rotation_6d')
 
-        # In this new runner we use alt_render_obs_key in the wrapper
+        # Enable rendering for observation generation even without video recording
+        enable_render = True # Set to True to get image observations
+
         def env_fn():
             robomimic_env = create_env(
-                env_meta=env_meta, 
-                shape_meta=shape_meta
+                env_meta=env_meta,
+                shape_meta=shape_meta,
+                enable_render=enable_render
             )
-            # Robosuite's hard reset causes excessive memory consumption.
             robomimic_env.env.hard_reset = False
+            # Wrap directly with RobomimicImageWrapper and MultiStepWrapper
             return MultiStepWrapper(
-                VideoRecordingWrapper(
-                    RobomimicImageWrapper(
-                        env=robomimic_env,
-                        shape_meta=shape_meta,
-                        init_state=None,
-                        render_obs_key=alt_obs_key  # <--- use alternate view
-                    ),
-                    video_recoder=VideoRecorder.create_h264(
-                        fps=fps, codec='h264', input_pix_fmt='rgb24', 
-                        crf=crf, thread_type='FRAME', thread_count=1
-                    ),
-                    file_path=None,
-                    steps_per_render=steps_per_render
+                RobomimicImageWrapper(
+                    env=robomimic_env,
+                    shape_meta=shape_meta,
+                    init_state=None,
+                    render_obs_key=alt_obs_key # Use alternate view
                 ),
                 n_obs_steps=n_obs_steps,
                 n_action_steps=n_action_steps,
                 max_episode_steps=max_steps
             )
-        
+
         def dummy_env_fn():
             robomimic_env = create_env(
-                    env_meta=env_meta, 
+                    env_meta=env_meta,
                     shape_meta=shape_meta,
-                    enable_render=False
+                    enable_render=False # No rendering needed for dummy env
                 )
+            # Wrap directly with RobomimicImageWrapper and MultiStepWrapper
             return MultiStepWrapper(
-                VideoRecordingWrapper(
-                    RobomimicImageWrapper(
-                        env=robomimic_env,
-                        shape_meta=shape_meta,
-                        init_state=None,
-                        render_obs_key=alt_obs_key  # <--- use alternate view here as well
-                    ),
-                    video_recoder=VideoRecorder.create_h264(
-                        fps=fps, codec='h264', input_pix_fmt='rgb24', 
-                        crf=crf, thread_type='FRAME', thread_count=1
-                    ),
-                    file_path=None,
-                    steps_per_render=steps_per_render
+                RobomimicImageWrapper(
+                    env=robomimic_env,
+                    shape_meta=shape_meta,
+                    init_state=None,
+                    render_obs_key=alt_obs_key # Use alternate view here as well
                 ),
                 n_obs_steps=n_obs_steps,
                 n_action_steps=n_action_steps,
@@ -185,52 +164,26 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         with h5py.File(dataset_path, 'r') as f:
             for i in range(n_train):
                 train_idx = train_start_idx + i
-                enable_render = i < n_train_vis
                 init_state = f[f'data/demo_{train_idx}/states'][0]
 
-                def init_fn(env, init_state=init_state, 
-                    enable_render=enable_render):
-                    # setup rendering
-                    assert isinstance(env.env, VideoRecordingWrapper)
-                    env.env.video_recoder.stop()
-                    env.env.file_path = None
-                    if enable_render:
-                        filename = pathlib.Path(output_dir).joinpath(
-                            'media', wv.util.generate_id() + ".mp4")
-                        filename.parent.mkdir(parents=False, exist_ok=True)
-                        filename = str(filename)
-                        env.env.file_path = filename
-
+                # init_fn no longer needs enable_render or file_path logic
+                def init_fn(env, init_state=init_state):
                     # switch to init_state reset
-                    assert isinstance(env.env.env, RobomimicImageWrapper)
-                    env.env.env.init_state = init_state
+                    assert isinstance(env.env, RobomimicImageWrapper)
+                    env.env.init_state = init_state
 
                 env_seeds.append(train_idx)
                 env_prefixs.append('train/')
                 env_init_fn_dills.append(dill.dumps(init_fn))
-        
+
         # test
         for i in range(n_test):
             seed = test_start_seed + i
-            # seed = local_rng.randint(0, 1000000)
-            enable_render = i < n_test_vis
-
-            def init_fn(env, seed=seed, 
-                enable_render=enable_render):
-                # setup rendering
-                assert isinstance(env.env, VideoRecordingWrapper)
-                env.env.video_recoder.stop()
-                env.env.file_path = None
-                if enable_render:
-                    filename = pathlib.Path(output_dir).joinpath(
-                        'media', wv.util.generate_id() + ".mp4")
-                    filename.parent.mkdir(parents=False, exist_ok=True)
-                    filename = str(filename)
-                    env.env.file_path = filename
-
+            # init_fn no longer needs enable_render or file_path logic
+            def init_fn(env, seed=seed):
                 # switch to seed reset
-                assert isinstance(env.env.env, RobomimicImageWrapper)
-                env.env.env.init_state = None
+                assert isinstance(env.env, RobomimicImageWrapper)
+                env.env.init_state = None
                 env.seed(seed)
 
             env_seeds.append(seed)
@@ -246,8 +199,6 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         self.env_seeds = env_seeds
         self.env_prefixs = env_prefixs
         self.env_init_fn_dills = env_init_fn_dills
-        self.fps = fps
-        self.crf = crf
         self.n_obs_steps = n_obs_steps
         self.n_action_steps = n_action_steps
         self.past_action = past_action
@@ -255,22 +206,20 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         self.rotation_transformer = rotation_transformer
         self.abs_action = abs_action
         self.tqdm_interval_sec = tqdm_interval_sec
-        # Save the expected view key (for the policy) and the alternate view key (used in the env)
         self.default_view_key = render_obs_key
         self.alt_render_obs_key = alt_obs_key
+        # Removed fps and crf attributes
 
     def run(self, policy: BaseImagePolicy):
         device = policy.device
         dtype = policy.dtype
         env = self.env
-        
-        # plan for rollout
+
         n_envs = len(self.env_fns)
         n_inits = len(self.env_init_fn_dills)
         n_chunks = math.ceil(n_inits / n_envs)
 
-        # allocate data
-        all_video_paths = [None] * n_inits
+        # allocate data - remove video paths
         all_rewards = [None] * n_inits
 
         for chunk_idx in range(n_chunks):
@@ -279,49 +228,41 @@ class RobomimicMultiviewRunner(BaseImageRunner):
             this_global_slice = slice(start, end)
             this_n_active_envs = end - start
             this_local_slice = slice(0,this_n_active_envs)
-            
+
             this_init_fns = self.env_init_fn_dills[this_global_slice]
             n_diff = n_envs - len(this_init_fns)
             if n_diff > 0:
                 this_init_fns.extend([self.env_init_fn_dills[0]]*n_diff)
             assert len(this_init_fns) == n_envs
 
-            # init envs
-            env.call_each('run_dill_function', 
+            env.call_each('run_dill_function',
                 args_list=[(x,) for x in this_init_fns])
 
-            # start rollout
             obs = env.reset()
             past_action = None
             policy.reset()
 
             env_name = self.env_meta['env_name']
-            pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval {env_name}Multiview {chunk_idx+1}/{n_chunks}", 
+            pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval {env_name}MultiviewNoVideo {chunk_idx+1}/{n_chunks}",
                 leave=False, mininterval=self.tqdm_interval_sec)
-            
+
             done = False
             while not done:
-                # create obs dict
                 np_obs_dict = dict(obs)
-                # Remap the alternate view image into the key expected by the policy.
-                # (i.e. copy the image from alt_render_obs_key to default_view_key)
                 if self.alt_render_obs_key != self.default_view_key:
                     np_obs_dict[self.default_view_key] = np_obs_dict[self.alt_render_obs_key]
                     del np_obs_dict[self.alt_render_obs_key]
-                
+
                 if self.past_action and (past_action is not None):
                     np_obs_dict['past_action'] = past_action[
                         :,-(self.n_obs_steps-1):].astype(np.float32)
-                
-                # device transfer
-                obs_dict = dict_apply(np_obs_dict, 
+
+                obs_dict = dict_apply(np_obs_dict,
                     lambda x: torch.from_numpy(x).to(device=device))
 
-                # run policy
                 with torch.no_grad():
                     action_dict = policy.predict_action(obs_dict)
 
-                # device transfer
                 np_action_dict = dict_apply(action_dict,
                     lambda x: x.detach().to('cpu').numpy())
 
@@ -329,8 +270,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                 if not np.all(np.isfinite(action)):
                     print(action)
                     raise RuntimeError("Nan or Inf action")
-                
-                # step env
+
                 env_action = action
                 if self.abs_action:
                     env_action = self.undo_transform_action(action)
@@ -339,17 +279,16 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                 done = np.all(done)
                 past_action = action
 
-                # update pbar
                 pbar.update(action.shape[1])
             pbar.close()
 
-            # collect data for this round
-            all_video_paths[this_global_slice] = env.render()[this_local_slice]
+            # collect data for this round - remove video paths
+            # env.render() is not called as there's no VideoRecordingWrapper
             all_rewards[this_global_slice] = env.call('get_attr', 'reward')[this_local_slice]
-        # clear out video buffer
+        # No need to clear video buffer
         _ = env.reset()
-        
-        # log
+
+        # log - remove video logging
         max_rewards = collections.defaultdict(list)
         log_data = dict()
         for i in range(n_inits):
@@ -358,12 +297,8 @@ class RobomimicMultiviewRunner(BaseImageRunner):
             max_reward = np.max(all_rewards[i])
             max_rewards[prefix].append(max_reward)
             log_data[prefix+f'sim_max_reward_{seed}'] = max_reward
+            # Removed video logging
 
-            video_path = all_video_paths[i]
-            if video_path is not None:
-                sim_video = wandb.Video(video_path)
-                log_data[prefix+f'sim_video_{seed}'] = sim_video
-        
         for prefix, value in max_rewards.items():
             ms_name = prefix+'mean_score'
             ms_value = np.mean(value)
@@ -392,4 +327,4 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         if raw_shape[-1] == 20:
             uaction = uaction.reshape(*raw_shape[:-1], 14)
 
-        return uaction
+        return uaction 
