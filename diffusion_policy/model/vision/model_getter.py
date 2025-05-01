@@ -77,3 +77,30 @@ def get_r3m(name, **kwargs):
     resnet_model = r3m_model.convnet
     resnet_model = resnet_model.to('cpu')
     return resnet_model
+
+def get_depthnet(name, weights=None, **kwargs):
+    """
+    name: resnet18, resnet34, resnet50
+    weights: "IMAGENET1K_V1", "r3m"
+    """
+    # load r3m weights
+    if (weights == "r3m") or (weights == "R3M"):
+        return get_r3m(name=name, **kwargs)
+
+    func = getattr(torchvision.models, name)
+    resnet = func(weights=weights, **kwargs)
+    
+    # Creating new Conv2d layer
+    layer = resnet.conv1
+    new_layer = nn.Conv2d(in_channels=1, 
+                        out_channels=layer.out_channels, 
+                        kernel_size=layer.kernel_size, 
+                        stride=layer.stride, 
+                        padding=layer.padding,
+                        bias=layer.bias)
+    resnet.conv1 = new_layer
+
+    resnet.avgpool = torch.nn.AdaptiveAvgPool2d((2, 2))
+    resnet.fc = torch.nn.Identity()
+    
+    return resnet
