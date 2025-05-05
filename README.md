@@ -1,3 +1,8 @@
+# pcd dp
+```
+python train.py --config-dir=. --config-name=train_diffusion_unet_pcd_workspace.yaml use_voxel=False n_obs_steps=2 se2_augmentation=False fix_point_num=1500 sample_point_num=1024 task=singletask_multiview_pcd_abs task_name=stack_d0 task.dataset_type=short task.dataset.max_train_episodes=5 policy.obs_encoder.pcd_model.name=pointnext task.dataset_root_path=/home/mingxi/data/mimicgen/hdf5_multiview_datasets
+```
+
 # Diffusion Policy
 
 [[Project page]](https://diffusion-policy.cs.columbia.edu/)
