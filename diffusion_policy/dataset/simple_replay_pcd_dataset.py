@@ -16,10 +16,8 @@ from threadpoolctl import threadpool_limits
 import concurrent.futures
 import multiprocessing
 from omegaconf import OmegaConf
-from robomimic.utils.obs_utils import localize_pcd_batch, crop_local_pcd_batch, pcd_to_voxel, WS_SIZE, VOXEL_RESO
+from robomimic.utils.obs_utils import pcd_to_voxel, WS_SIZE, VOXEL_RESO
 from robomimic.utils.obs_utils import WORKSPACE as VALID_WORKSPACE
-from einops import rearrange
-import open3d as o3d
 
 from diffusion_policy.common.pytorch_util import dict_apply
 from diffusion_policy.dataset.base_dataset import BaseImageDataset, LinearNormalizer
@@ -116,17 +114,12 @@ class SimpleReplayPCDDataset(BaseImageDataset):
         ):
         rotation_transformer = RotationTransformer(
             from_rep='axis_angle', to_rep=rotation_rep)
-        f = open('/'+os.path.join(*dataset_path.split('/')[:-1], 'camera_meta.json'))
-        camera_infos = json.load(f)
 
         assert 'abs' in dataset_path, "this class only supports abs actions"
 
-        main_camera = 'spaceview'
-        modality = "pcd"
-
         replay_buffer = None
         if use_cache:
-            cache_zarr_path = dataset_path.replace(main_camera, f"{main_camera}_{modality}") + '.zarr.zip'
+            cache_zarr_path = dataset_path + '.zarr.zip'
             cache_lock_path = cache_zarr_path + '.lock'
             print('Acquiring lock on cache.')
             with FileLock(cache_lock_path):
@@ -178,7 +171,7 @@ class SimpleReplayPCDDataset(BaseImageDataset):
                 rgb_keys.append(key)
             elif type == 'depth':
                 depth_keys.append(key)
-                self.depth_range[key] = ObsUtils.DEPTH_MINMAX[key]
+                # self.depth_range[key] = ObsUtils.DEPTH_MINMAX[key]
             elif type == 'low_dim':
                 lowdim_keys.append(key)
         
@@ -228,8 +221,6 @@ class SimpleReplayPCDDataset(BaseImageDataset):
         self.pad_before = pad_before
         self.pad_after = pad_after
         self.use_legacy_normalizer = use_legacy_normalizer
-        self.main_camera = main_camera
-        self.camera_infos = camera_infos
         assert abs_action == True, "this class only supports abs action"
 
         self.fix_point_num = fix_point_num
@@ -308,14 +299,14 @@ class SimpleReplayPCDDataset(BaseImageDataset):
             normalizer[key] = get_image_range_normalizer()
 
         # depth
-        for key in self.depth_keys:
-            # depth_min, depth_max = self.depth_range[key]
-            # stat = {'min': np.array([depth_min], dtype=np.float32), 'max': np.array([depth_max], dtype=np.float32)}
-            # normalizer[key] = DepthNormalizer(stat) 
-            depth_min, depth_max = self.depth_range[key]
-            stat = {'min': np.array([depth_min], dtype=np.float32), 'max': np.array([depth_max], dtype=np.float32)}
-            # normalizer[key] = DepthNormalizer(stat) 
-            normalizer[key] = get_range_normalizer_from_stat(stat) 
+        # for key in self.depth_keys:
+        #     # depth_min, depth_max = self.depth_range[key]
+        #     # stat = {'min': np.array([depth_min], dtype=np.float32), 'max': np.array([depth_max], dtype=np.float32)}
+        #     # normalizer[key] = DepthNormalizer(stat) 
+        #     depth_min, depth_max = self.depth_range[key]
+        #     stat = {'min': np.array([depth_min], dtype=np.float32), 'max': np.array([depth_max], dtype=np.float32)}
+        #     # normalizer[key] = DepthNormalizer(stat) 
+        #     normalizer[key] = get_range_normalizer_from_stat(stat) 
 
         return normalizer
 
@@ -438,28 +429,28 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     if max_inflight_tasks is None:
         max_inflight_tasks = n_workers * 5
 
-    # # parse shape_meta
-    # obs_keys = list()
-    # lowdim_keys = list()
-    # # construct compressors and chunks
-    # obs_shape_meta = shape_meta['obs']
-    # for key, attr in obs_shape_meta.items():
-    #     shape = attr['shape']
-    #     type = attr.get('type', 'low_dim')
-    #     if type == 'pcd':
-    #         obs_keys.append(key)
-    #     elif type == 'rgb':
-    #         obs_keys.append(key)
-    #     elif type == 'depth':
-    #         obs_keys.append(key)
-    #     elif type == 'low_dim':
-    #         lowdim_keys.append(key)
+    # parse shape_meta
+    obs_keys = list()
+    lowdim_keys = list()
+    # construct compressors and chunks
+    obs_shape_meta = shape_meta['obs']
+    for key, attr in obs_shape_meta.items():
+        shape = attr['shape']
+        type = attr.get('type', 'low_dim')
+        if type == 'pcd':
+            obs_keys.append(key)
+        elif type == 'rgb':
+            obs_keys.append(key)
+        elif type == 'depth':
+            obs_keys.append(key)
+        elif type == 'low_dim':
+            lowdim_keys.append(key)
 
-    obs_keys = ['spaceview_image', 'spaceview_depth', 'robot0_eye_in_hand_image', 'pcd']
-    lowdim_keys = ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
-    shape_meta['obs']['pcd'] = {'shape': [4412, 6], 'type': 'pcd'}
-    shape_meta['obs']['spaceview_image'] = {'shape': [3, 128, 128], 'type': 'rgb'}
-    shape_meta['obs']['spaceview_depth'] = {'shape': [1, 128, 128], 'type': 'depth'}
+    # obs_keys = ['spaceview_image', 'spaceview_depth', 'robot0_eye_in_hand_image', 'pcd']
+    # lowdim_keys = ['robot0_eef_pos', 'robot0_eef_quat', 'robot0_gripper_qpos']
+    # shape_meta['obs']['pcd'] = {'shape': [4412, 6], 'type': 'pcd'}
+    # shape_meta['obs']['spaceview_image'] = {'shape': [3, 128, 128], 'type': 'rgb'}
+    # shape_meta['obs']['spaceview_depth'] = {'shape': [1, 128, 128], 'type': 'depth'}
 
     root = zarr.group(store)
     data_group = root.require_group('data', overwrite=True)

@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import torchvision.transforms.v2 as v2
 import torchvision.transforms.functional as ttf
 import diffusion_policy.model.common.tensor_util as tu
 from torch_geometric.nn import fps

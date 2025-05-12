@@ -28,13 +28,20 @@ def create_env(env_meta, shape_meta, enable_render=True):
     modality_mapping = collections.defaultdict(list)
     for key, attr in shape_meta['obs'].items():
         modality_mapping[attr.get('type', 'low_dim')].append(key)
-    for cam in env_meta['env_kwargs']['camera_names']:
-        rgb_cam = cam+"_image"
-        depth_cam = cam+"_depth"
-        if rgb_cam not in shape_meta['obs'].keys():
-            modality_mapping['rgb'].append(rgb_cam)
-        if depth_cam not in shape_meta['obs'].keys():
-            modality_mapping['depth'].append(depth_cam)
+
+        if "pcd" in key:
+            camera_name = key.split("_")[0]
+            if camera_name+"_image" not in shape_meta['obs'].keys():
+                modality_mapping['rgb'].append(camera_name+"_image")
+            if camera_name+"_depth" not in shape_meta['obs'].keys():
+                modality_mapping['depth'].append(camera_name+"_depth")
+    # for cam in env_meta['env_kwargs']['camera_names']:
+    #     rgb_cam = cam+"_image"
+    #     depth_cam = cam+"_depth"
+    #     if rgb_cam not in shape_meta['obs'].keys():
+    #         modality_mapping['rgb'].append(rgb_cam)
+    #     if depth_cam not in shape_meta['obs'].keys():
+    #         modality_mapping['depth'].append(depth_cam)
     ObsUtils.initialize_obs_modality_mapping_from_dict(modality_mapping)
 
     env = EnvUtils.create_env_from_metadata(
@@ -64,7 +71,7 @@ class RobomimicImageRunner(BaseImageRunner):
             max_steps=400,
             n_obs_steps=2,
             n_action_steps=8,
-            render_obs_key='spaceview_image',
+            render_obs_key='agentview_image',
             fps=10,
             crf=22,
             past_action=False,

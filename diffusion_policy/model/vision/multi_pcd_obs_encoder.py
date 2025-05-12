@@ -9,7 +9,7 @@ from diffusion_policy.model.common.module_attr_mixin import ModuleAttrMixin
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 from diffusion_policy.model.vision.noise_adder import (PointCloudJitter, RandomPointDropout, FarthestPointSampling, NoisePointAdder,
                                                        PointCloudOffsetter, RandomColorDropout)
-
+from diffusion_policy.model.vision.crop_randomizer import VoxelCropRandomizer
 
 def send_cons_to_device(self, constants, device):
     l = []

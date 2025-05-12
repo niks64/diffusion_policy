@@ -39,10 +39,10 @@ class TopKCheckpointManager:
 
         delete_path = None
         if self.mode == 'max':
-            if value > min_value:
+            if value >= min_value:
                 delete_path = min_path
         else:
-            if value < max_value:
+            if value <= max_value:
                 delete_path = max_path
 
         if delete_path is None:
