@@ -26,22 +26,22 @@ import robomimic.utils.obs_utils as ObsUtils
 
 def create_env(env_meta, shape_meta, enable_render=True):
     modality_mapping = collections.defaultdict(list)
+
+    camera_names = []
     for key, attr in shape_meta['obs'].items():
         modality_mapping[attr.get('type', 'low_dim')].append(key)
-
         if "pcd" in key:
             camera_name = key.split("_")[0]
+            camera_names.append(camera_name)
             if camera_name+"_image" not in shape_meta['obs'].keys():
                 modality_mapping['rgb'].append(camera_name+"_image")
             if camera_name+"_depth" not in shape_meta['obs'].keys():
                 modality_mapping['depth'].append(camera_name+"_depth")
-    # for cam in env_meta['env_kwargs']['camera_names']:
-    #     rgb_cam = cam+"_image"
-    #     depth_cam = cam+"_depth"
-    #     if rgb_cam not in shape_meta['obs'].keys():
-    #         modality_mapping['rgb'].append(rgb_cam)
-    #     if depth_cam not in shape_meta['obs'].keys():
-    #         modality_mapping['depth'].append(depth_cam)
+        elif "image" in key:
+            camera_name = key.split("_image")[0]
+            camera_names.append(camera_name)
+    env_meta['env_kwargs']['camera_names'] = camera_names
+    
     ObsUtils.initialize_obs_modality_mapping_from_dict(modality_mapping)
 
     env = EnvUtils.create_env_from_metadata(

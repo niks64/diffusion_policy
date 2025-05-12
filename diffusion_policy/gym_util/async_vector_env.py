@@ -7,6 +7,7 @@ Added render method.
 
 import numpy as np
 import multiprocessing as mp
+mp.set_start_method('spawn', force=True)
 import time
 import sys
 from enum import Enum
