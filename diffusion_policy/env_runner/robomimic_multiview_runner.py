@@ -30,8 +30,22 @@ from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 
 def create_env(env_meta, shape_meta, enable_render=True):
     modality_mapping = collections.defaultdict(list)
+
+    camera_names = []
     for key, attr in shape_meta['obs'].items():
         modality_mapping[attr.get('type', 'low_dim')].append(key)
+        if "pcd" in key:
+            camera_name = key.split("_")[0]
+            camera_names.append(camera_name)
+            if camera_name+"_image" not in shape_meta['obs'].keys():
+                modality_mapping['rgb'].append(camera_name+"_image")
+            if camera_name+"_depth" not in shape_meta['obs'].keys():
+                modality_mapping['depth'].append(camera_name+"_depth")
+        elif "image" in key:
+            camera_name = key.split("_image")[0]
+            camera_names.append(camera_name)
+    env_meta['env_kwargs']['camera_names'] = camera_names
+
     ObsUtils.initialize_obs_modality_mapping_from_dict(modality_mapping)
 
     env = EnvUtils.create_env_from_metadata(
@@ -63,8 +77,9 @@ class RobomimicMultiviewRunner(BaseImageRunner):
             max_steps=400,
             n_obs_steps=2,
             n_action_steps=8,
-            render_obs_key='agentview_image',  # expected key for policy input
-            alt_obs_key='agentview_image',  # new argument: alternate view key
+            render_obs_key='agentview_image',
+            original_obs_key='agentview_image',
+            test_obs_key='agentview_image',
             fps=10,
             crf=22,
             past_action=False,
@@ -88,29 +103,21 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         # disable object state observation
         env_meta['env_kwargs']['use_object_obs'] = False
         env_meta['env_kwargs']['reward_shaping'] = reward_shaping
-        if alt_obs_key.split("_")[0] not in env_meta['env_kwargs']['camera_names']:
-            env_meta['env_kwargs']['camera_names'].append(alt_obs_key.split("_")[0])
-        
-        camera_shape = [3, 128, 128]
+
+        assert original_obs_key in shape_meta["obs"].keys()
+        assert ("image" in original_obs_key and "image" in test_obs_key) or ("pcd" in original_obs_key and "pcd" in test_obs_key)
+
+        original_obs_shape = shape_meta["obs"][original_obs_key]["shape"]
 
         new_obs = {}
-        for key, value in shape_meta["obs"].items():
-            if "image" in key:
-                camera_shape = value["shape"]
-                break
 
-        new_obs[alt_obs_key] = {
-            "shape": camera_shape,
-            "type": "rgb"
-        }
-
-        new_obs["robot0_eye_in_hand_image"] = {
-            "shape": camera_shape,
+        new_obs[test_obs_key] = {
+            "shape": original_obs_shape,
             "type": "rgb"
         }
 
         for key, value in shape_meta["obs"].items():
-            if "image" not in key:
+            if key != original_obs_key:
                 new_obs[key] = value
 
         shape_meta["obs"] = new_obs
@@ -136,7 +143,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
-                        render_obs_key=alt_obs_key  # <--- use alternate view
+                        render_obs_key=test_obs_key if "image" in test_obs_key else test_obs_key.replace("pcd", "image")
                     ),
                     video_recoder=VideoRecorder.create_h264(
                         fps=fps, codec='h264', input_pix_fmt='rgb24', 
@@ -162,7 +169,7 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                         env=robomimic_env,
                         shape_meta=shape_meta,
                         init_state=None,
-                        render_obs_key=alt_obs_key  # <--- use alternate view here as well
+                        render_obs_key=test_obs_key if "image" in test_obs_key else test_obs_key.replace("pcd", "image")
                     ),
                     video_recoder=VideoRecorder.create_h264(
                         fps=fps, codec='h264', input_pix_fmt='rgb24', 
@@ -256,8 +263,9 @@ class RobomimicMultiviewRunner(BaseImageRunner):
         self.abs_action = abs_action
         self.tqdm_interval_sec = tqdm_interval_sec
         # Save the expected view key (for the policy) and the alternate view key (used in the env)
-        self.default_view_key = render_obs_key
-        self.alt_render_obs_key = alt_obs_key
+        self.render_obs_key = render_obs_key
+        self.original_obs_key = original_obs_key
+        self.test_obs_key = test_obs_key
 
     def run(self, policy: BaseImagePolicy):
         device = policy.device
@@ -305,9 +313,9 @@ class RobomimicMultiviewRunner(BaseImageRunner):
                 np_obs_dict = dict(obs)
                 # Remap the alternate view image into the key expected by the policy.
                 # (i.e. copy the image from alt_render_obs_key to default_view_key)
-                if self.alt_render_obs_key != self.default_view_key:
-                    np_obs_dict[self.default_view_key] = np_obs_dict[self.alt_render_obs_key]
-                    del np_obs_dict[self.alt_render_obs_key]
+                if self.test_obs_key != self.original_obs_key:
+                    np_obs_dict[self.original_obs_key] = np_obs_dict[self.test_obs_key]
+                    del np_obs_dict[self.test_obs_key]
                 
                 if self.past_action and (past_action is not None):
                     np_obs_dict['past_action'] = past_action[
