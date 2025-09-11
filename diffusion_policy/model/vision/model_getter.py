@@ -6,6 +6,38 @@ def get_dino(name="dinov2_vits14"):
     return torch.hub.load('facebookresearch/dinov2', name)
 
 
+import sys
+sys.path.insert(0, "/oscar/data/stellex/nharlalk/dinov3")  # repo root
+
+from dinov3.hub.backbones import dinov3_vitb16  # only backbones
+
+def get_dinov3(name="dinov3_vitb16", **kwargs):
+    if name not in ["dinov3_vitb16"]:
+        raise ValueError(f"Dinov3 model {name} not downloaded yet")
+    model = dinov3_vitb16(pretrained=False,weights=None, **kwargs)
+    raw = torch.load(f"/oscar/data/stellex/shared/dinov3/{name}.pth", map_location="cpu")
+    state_dict = raw.get("model", raw)  # support either format
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if missing or unexpected:
+        print("Missing keys:", missing)
+        print("Unexpected keys:", unexpected)
+    model.eval()
+    return model
+
+# def get_dinov3(name="dinov3_vitb16", **kwargs):
+#     if name not in ["dinov3_vitb16"]:
+#         raise ValueError(f"Dinov3 model {name} not downloaded yet")
+
+#     dinov3_vitb16 = torch.hub.load(
+#         "/oscar/data/stellex/nharlalk/dinov3", 
+#         name, 
+#         source='local', 
+#         weights=f"/oscar/data/stellex/shared/dinov3/{name}.pth"
+#     )
+
+#     return dinov3_vitb16
+
+
 def get_resnet(name, weights=None, **kwargs):
     """
     name: resnet18, resnet34, resnet50

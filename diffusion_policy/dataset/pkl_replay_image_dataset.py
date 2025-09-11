@@ -173,16 +173,16 @@ def _convert_pkl_to_replay(store, shape_meta, dataset_path, rotation_transformer
             for step in traj:
                 # low-dim obs
                 for key in lowdim_keys:
-                    value = _get_nested(step, key)  # key is dotted path
+                    value = step[key]
                     lowdim_buffers[key][global_idx] = np.asarray(value, dtype=np.float32)
 
                 # store ee_pose and gripper for actions
-                ee_pose_ep.append(_get_nested(step, 'observation.ee_pose'))
-                gripper_ep.append(_get_nested(step, 'observation.gripper'))
+                ee_pose_ep.append(step['observation.ee_pose'])
+                gripper_ep.append(step['observation.gripper'])
 
                 # images
                 for key in rgb_keys:
-                    img = _get_nested(step, key)  # expect H,W,C uint8
+                    img = step[key]  # expect H,W,C uint8
                     rgb_ep[key].append(np.asarray(img, dtype=np.uint8))
 
                 global_idx += 1
@@ -362,27 +362,24 @@ if __name__ == "__main__":
     pkl_replay_image_dataset = PklReplayImageDataset(
         shape_meta={
             "obs": {
-                "dave_image": {
+                "observation.images.dave": {
                     "shape": (3, 480, 640),
                     "type": "rgb"
                 },
-                "wrist_image": {
+                "observation.images.wrist": {
                     "shape": (3, 480, 640),
                     "type": "rgb"
                 },
-                "robot0_eef_pos": {
-                    "shape": (3,)
+                "observation.ee_pose": {
+                    "shape": (7,)
                 },
-                "robot0_eef_quat": {
-                    "shape": (4,)
-                },
-                "robot0_gripper_qpos": {
+                "observation.gripper": {
                     "shape": (2,)
                 }
             },
             "action": {"shape": (10,)}
         },
-        dataset_path = "/Users/nikunj/Desktop/CIL",
+        dataset_path = "/oscar/data/stellex/nharlalk/real_data",
         horizon = 16,
         pad_before = 0,
         pad_after = 0,
@@ -395,4 +392,5 @@ if __name__ == "__main__":
 
     train_dataloader = DataLoader(pkl_replay_image_dataset, batch_size=4, shuffle=True)
     batch = next(iter(train_dataloader))
-    print(batch)
+    print(batch['obs'].keys())
+    print(batch['action'].shape)
